@@ -34,7 +34,7 @@ $p(x) = a_0x^{e_0} + a_1x^{e_1} + ...... + a_nx^{e_n}$
 5. **Eval**：走訪每一個非零項，累加 $coef * f^{exp}$。
 6. **輸入輸出**：
    - **>>**：先讀項數 $n$，再讀 $n$ 組「係數 指數」，每讀一項就用 Add 併入，因此輸入不需事先排序，同指數的項也會自動合併。
-   - **<<**：由高次到低次輸出成 **3x^2 + 2x - 1** 的格式，並處理係數為 $+- 1$、指數為 0 或 1、零多項式等特殊情況。
+   - **<<**：由高次到低次輸出成 **3x^2 + 2x - 1** 的格式，並處理係數為 $\pm 1$、指數為 0 或 1、零多項式等特殊情況。
 7. **記憶體管理**：類別內有動態配置的陣列，因此自行實作解構子、複製建構子與 operator=（深層複製），避免 Add、Mult 以傳值回傳時發生重複釋放記憶體。
 
 ## 程式實作
@@ -42,7 +42,173 @@ $p(x) = a_0x^{e_0} + a_1x^{e_1} + ...... + a_nx^{e_n}$
 以下為完整程式碼：
 
 ```cpp
+#include <iostream>
+#include <cmath>
+#include <algorithm>
+using namespace std;
 
+class Polynomial;
+
+class Term {
+    friend class Polynomial;
+    friend ostream& operator<<(ostream&, const Polynomial&);
+private:
+    float coef;
+    int   exp;
+};
+
+class Polynomial {
+    friend ostream& operator<<(ostream&, const Polynomial&);
+    friend istream& operator>>(istream&, Polynomial&);
+private:
+    Term *termArray;
+    int capacity;
+    int terms;
+
+    void newTerm(const float theCoef, const int theExp);
+public:
+    Polynomial();
+    Polynomial(const Polynomial& other);
+    Polynomial& operator=(const Polynomial& other);
+    ~Polynomial();
+
+    Polynomial Add(const Polynomial& poly) const;
+    Polynomial Mult(const Polynomial& poly) const;
+    float Eval(float f) const;
+};
+
+Polynomial::Polynomial() : capacity(1), terms(0) {
+    termArray = new Term[capacity];
+}
+
+Polynomial::Polynomial(const Polynomial& other)
+    : capacity(other.capacity), terms(other.terms) {
+    termArray = new Term[capacity];
+    for (int i = 0; i < terms; i++)
+        termArray[i] = other.termArray[i];
+}
+
+Polynomial& Polynomial::operator=(const Polynomial& other) {
+    if (this != &other) {
+        Term *temp = new Term[other.capacity];
+        for (int i = 0; i < other.terms; i++)
+            temp[i] = other.termArray[i];
+        delete [] termArray;
+        termArray = temp;
+        capacity  = other.capacity;
+        terms     = other.terms;
+    }
+    return *this;
+}
+
+Polynomial::~Polynomial() {
+    delete [] termArray;
+}
+
+void Polynomial::newTerm(const float theCoef, const int theExp) {
+    if (theCoef == 0) return;
+    if (terms == capacity) {
+        capacity *= 2;
+        Term *temp = new Term[capacity];
+        copy(termArray, termArray + terms, temp);
+        delete [] termArray;
+        termArray = temp;
+    }
+    termArray[terms].coef = theCoef;
+    termArray[terms++].exp = theExp;
+}
+
+Polynomial Polynomial::Add(const Polynomial& b) const {
+    Polynomial c;
+    int aPos = 0, bPos = 0;
+
+    while (aPos < terms && bPos < b.terms) {
+        if (termArray[aPos].exp == b.termArray[bPos].exp) {
+            c.newTerm(termArray[aPos].coef + b.termArray[bPos].coef,
+                      termArray[aPos].exp);
+            aPos++; bPos++;
+        } else if (termArray[aPos].exp < b.termArray[bPos].exp) {
+            c.newTerm(b.termArray[bPos].coef, b.termArray[bPos].exp);
+            bPos++;
+        } else {
+            c.newTerm(termArray[aPos].coef, termArray[aPos].exp);
+            aPos++;
+        }
+    }
+    for (; aPos < terms; aPos++)
+        c.newTerm(termArray[aPos].coef, termArray[aPos].exp);
+    for (; bPos < b.terms; bPos++)
+        c.newTerm(b.termArray[bPos].coef, b.termArray[bPos].exp);
+    return c;
+}
+
+Polynomial Polynomial::Mult(const Polynomial& b) const {
+    Polynomial c;
+    for (int i = 0; i < terms; i++) {
+        Polynomial t;
+        for (int j = 0; j < b.terms; j++)
+            t.newTerm(termArray[i].coef * b.termArray[j].coef,
+                      termArray[i].exp  + b.termArray[j].exp);
+        c = c.Add(t);
+    }
+    return c;
+}
+
+float Polynomial::Eval(float f) const {
+    float result = 0;
+    for (int i = 0; i < terms; i++)
+        result += termArray[i].coef * pow(f, termArray[i].exp);
+    return result;
+}
+
+ostream& operator<<(ostream& os, const Polynomial& p) {
+    if (p.terms == 0) return os << 0;
+
+    for (int i = 0; i < p.terms; i++) {
+        float c = p.termArray[i].coef;
+        int   e = p.termArray[i].exp;
+
+        if (i == 0) { if (c < 0) os << "-"; }
+        else        os << (c < 0 ? " - " : " + ");
+
+        float a = (c < 0) ? -c : c;
+        if (e == 0 || a != 1) os << a;
+        if (e >= 1) os << "x";
+        if (e >  1) os << "^" << e;
+    }
+    return os;
+}
+
+istream& operator>>(istream& is, Polynomial& p) {
+    int n;
+    if (!(is >> n)) return is;
+    p = Polynomial();
+    for (int i = 0; i < n; i++) {
+        float c; int e;
+        if (!(is >> c >> e)) break;
+        Polynomial t;
+        t.newTerm(c, e);
+        p = p.Add(t);
+    }
+    return is;
+}
+
+int main() {
+    Polynomial a, b;
+    cout << "輸入格式: 項數 係數 指數 係數 指數 ...  (例: 3 3 2 2 1 1 0 代表 3x^2+2x+1)" << endl;
+    cout << "a: "; cin >> a;
+    cout << "b: "; cin >> b;
+
+    cout << "a     = " << a << endl;
+    cout << "b     = " << b << endl;
+    cout << "a+b   = " << a.Add(b) << endl;
+    cout << "a*b   = " << a.Mult(b) << endl;
+    cout << "a(2)  = " << a.Eval(2) << endl;
+
+    Polynomial z;
+    cout << "zero  = " << z << endl;
+    return 0;
+}
 ```
 
 ## 效能分析
@@ -68,9 +234,9 @@ $p(x) = a_0x^{e_0} + a_1x^{e_1} + ...... + a_nx^{e_n}$
 
 | 測試案例 | 測試目的 | 輸入 | 預期輸出 | 實際輸出 |
 |----------|----------|------|----------|----------|
-| 測試一 | 一般情況： $a = 3x^2+2x+1$、 $b = x-1$（加法中有項相消） | a: 3 3 2 2 1 1 0, b: 2 1 1 -1 0 | a+b = 3x^2 + 3x, a*b = 3x^3 - x^2 - x - 1, a(2) = 17 | a+b = 3x^2 + 3x, a*b = 3x^3 - x^2 - x - 1, a(2) = 17 |
-| 測試二 | 零多項式： $a = 0$（項數為 0）、$b = 2x+1$ | a: 0, b: 2 2 1 1 0 | a = 0, a+b = 2x + 1, a*b = 0, a(2) = 0 | a = 0, a+b = 2x + 1, a*b = 0, a(2) = 0 |
-| 測試三 | 完全抵銷： $a = x^2+1$、$b = -x^2-1$ | a: 2 1 2 1 0, b: 2 -1 2 -1 0 | a+b = 0, a*b = -x^4 - 2x^2 - 1, a(2) = 5 | a+b = 0, a*b = -x^4 - 2x^2 - 1, a(2) = 5 |
+| 測試一 | 一般情況： $a = 3x^2+2x+1$、 $b = x-1$（加法中有項相消） | a: 3 3 2 2 1 1 0<br>b: 2 1 1 -1 0 | a+b = 3x^2 + 3x<br>a*b = 3x^3 - x^2 - x - 1<br>a(2) = 17 | a+b = 3x^2 + 3x<br>a*b = 3x^3 - x^2 - x - 1<br>a(2) = 17 |
+| 測試二 | 零多項式： $a = 0$（項數為 0）、 $b = 2x+1$ | a: 0, b: 2 2 1 1 0 | a = 0<br>a+b = 2x + 1<br>a*b = 0<br>a(2) = 0 | a = 0<br>a+b = 2x + 1<br>a*b = 0<br>a(2) = 0 |
+| 測試三 | 完全抵銷： $a = x^2+1$、 $b = -x^2-1$ | a: 2 1 2 1 0, b: 2 -1 2 -1 0 | a+b = 0, a*b = -x^4 - 2x^2 - 1, a(2) = 5 | a+b = 0, a*b = -x^4 - 2x^2 - 1, a(2) = 5 |
 | 測試四 | 輸入未排序、有重複指數： $a = 1 + 2x^3 + 5x^3 - 1 = 7x^3$ | a: 4 1 0 2 3 5 3 -1 0, b: 2 -7 3 1 1 | a = 7x^3, b = -7x^3 + x, a+b = x, a*b = -49x^6 + 7x^4, a(2) = 56 | a = 7x^3, b = -7x^3 + x, a+b = x, a*b = -49x^6 + 7x^4, a(2) = 56 |
 | 測試五 | 常數項與高次項： $a = 5$、$b = x^{100}$ | a: 1 5 0, b: 1 1 100 | b = x^100, a+b = x^100 + 5, a*b = 5x^100, a(2) = 5 | b = x^100, a+b = x^100 + 5, a*b = 5x^100, a(2) = 5 |
 | 測試六 | 負係數與係數 $\pm 1$：$a = -x^2+x-1$、$b = x+1$ | a: 3 -1 2 1 1 -1 0, b: 2 1 1 1 0 | a = -x^2 + x - 1, a+b = -x^2 + 2x, a*b = -x^3 - 1, a(2) = -3 | a = -x^2 + x - 1, a+b = -x^2 + 2x, a*b = -x^3 - 1, a(2) = -3 |
